@@ -26,7 +26,7 @@ export type HostMessage =
   | { type: 'hello' }
   | { type: 'key'; action: 'down' | 'up'; code: string }
   | { type: 'list-saves'; id: string }
-  | { type: 'export-save'; id: string }
+  | { type: 'export-save'; id: string; app: string }
   | { type: 'import-save'; id: string; files: SaveBlob[] };
 
 export type EmulatorMessage =
@@ -78,13 +78,17 @@ const isSaveBlobs = (v: unknown): boolean => {
   return true;
 };
 
+/** The game's save directory name, one path segment: the part between the first two slashes of a save path. */
+export const isAppName = (v: unknown): v is string =>
+  isString(v, 128) && v !== '.' && v !== '..' && !v.includes('/') && !v.includes('\\') && !v.includes('\0');
+
 const isGameId = (v: unknown): boolean => typeof v === 'string' && GAME_ID.test(v);
 
 const hostValidators: Record<HostMessage['type'], Validator> = {
   hello: () => true,
   key: (m) => (m.action === 'down' || m.action === 'up') && typeof m.code === 'string' && KEY_CODE.test(m.code),
   'list-saves': (m) => typeof m.id === 'string' && GAME_ID.test(m.id),
-  'export-save': (m) => isGameId(m.id),
+  'export-save': (m) => isGameId(m.id) && isAppName(m.app),
   'import-save': (m) => isGameId(m.id) && isSaveBlobs(m.files),
 };
 
@@ -128,7 +132,7 @@ const KNOWN_FIELDS: Record<string, string[]> = {
   hello: [],
   key: ['action', 'code'],
   'list-saves': ['id'],
-  'export-save': ['id'],
+  'export-save': ['id', 'app'],
   'import-save': ['id', 'files'],
   'save-data': ['id', 'files'],
   'import-result': ['id', 'imported'],

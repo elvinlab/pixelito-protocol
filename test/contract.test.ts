@@ -131,7 +131,7 @@ const GOOD = '/Rally Master Pro/rms/FL_RMP_OPT';
 
 test('save export and import messages round-trip through envelope', () => {
   for (const m of [
-    { type: 'export-save' as const, id: 'GAEM' },
+    { type: 'export-save' as const, id: 'GAEM', app: 'Rally Master Pro' },
     { type: 'import-save' as const, id: 'GAEM', files: [blob(GOOD)] },
   ]) {
     const r = parseMessage(envelope(m), 'host-to-emulator');
@@ -173,9 +173,16 @@ test('import-result rejects negative, fractional and huge counts', () => {
 });
 
 test('save messages are only valid in their own direction and drop extra fields', () => {
-  fails(parseMessage(envelope({ type: 'export-save', id: 'GAEM' }), 'emulator-to-host'), 'unknown-type');
+  fails(parseMessage(envelope({ type: 'export-save', id: 'GAEM', app: 'A' }), 'emulator-to-host'), 'unknown-type');
   fails(parseMessage(envelope({ type: 'import-result', id: 'GAEM', imported: 1 }), 'host-to-emulator'), 'unknown-type');
   const r = parseMessage({ pixelito: 1, type: 'import-save', id: 'GAEM', files: [{ ...blob(GOOD), extra: 1 }], x: 1 }, 'host-to-emulator');
   ok(r);
   assert.deepEqual(Object.keys(r.ok ? (r.message as { files: object[] }).files[0]! : {}), ['path', 'data']);
+});
+
+test('export-save needs a one-segment app name', () => {
+  for (const app of ['', '..', '.', 'a/b', '/a', 'a\\b', 'x'.repeat(129), 5, undefined]) {
+    fails(parseMessage({ pixelito: 1, type: 'export-save', id: 'GAEM', app }, 'host-to-emulator'), 'invalid-fields');
+  }
+  ok(parseMessage({ pixelito: 1, type: 'export-save', id: 'GAEM', app: 'Rally Master Pro' }, 'host-to-emulator'));
 });
