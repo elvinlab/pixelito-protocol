@@ -8,7 +8,7 @@ Both sides must:
 2. Validate `event.data` with `parseMessage` before acting. Anything invalid is ignored silently, never answered.
 3. Reply with an explicit target origin, never `*`.
 
-Messages in v1 (`{ pixelito: 1, type, ... }`): host to emulator `hello`, `key`, `list-saves`; emulator to host `ready`, `started`, `saves`, `error`. Design notes and evidence are in the Pixelito docs (`docs/notes/bridge-protocol.md`).
+Messages in v1 (`{ pixelito: 1, type, ... }`): host to emulator `hello`, `key`, `list-saves`, `export-save`, `import-save`; emulator to host `ready`, `started`, `saves`, `save-data`, `import-result`, `error`. Save bytes travel as `ArrayBuffer`; paths must be `/<app>/rms/<file>` and size limits apply (`MAX_SAVE_FILES`, `MAX_SAVE_FILE_BYTES`, `MAX_SAVE_TOTAL_BYTES`). Design notes and evidence are in the Pixelito docs (`docs/notes/bridge-protocol.md`).
 
 Extra fields are ignored and dropped. Exact key-code validity belongs to the emulator (it answers `error: bad-key`); this package only checks the shape.
 
@@ -25,4 +25,4 @@ pnpm test
 - No type checker is wired in yet (adding `typescript` is a dependency decision).
 - The ID, path, and size limits (`GAME_ID`, 256-character paths, 4096 px) are guesses to confirm against real emulator behaviour.
 - Tests were written by the same author as the code; an independent review is advised before the emulator and app depend on it.
-- `load`, `suspend`, `resume`, `volume`, export and import of saves, pointer events are not part of v1 yet.
+- `load`, `suspend`, `resume`, `volume`, pointer events are not part of v1 yet.

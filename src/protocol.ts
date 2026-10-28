@@ -17,15 +17,24 @@ export interface SaveFile {
   path: string;
 }
 
+/** A save file with its bytes, as moved by `export-save` and `import-save`. */
+export interface SaveBlob extends SaveFile {
+  data: ArrayBuffer;
+}
+
 export type HostMessage =
   | { type: 'hello' }
   | { type: 'key'; action: 'down' | 'up'; code: string }
-  | { type: 'list-saves'; id: string };
+  | { type: 'list-saves'; id: string }
+  | { type: 'export-save'; id: string }
+  | { type: 'import-save'; id: string; files: SaveBlob[] };
 
 export type EmulatorMessage =
   | { type: 'ready'; capabilities: string[] }
   | { type: 'started'; width: number; height: number }
   | { type: 'saves'; id: string; files: SaveFile[] }
+  | { type: 'save-data'; id: string; files: SaveBlob[] }
+  | { type: 'import-result'; id: string; imported: number }
   | { type: 'error'; code: ErrorCode };
 
 export type Message = HostMessage | EmulatorMessage;
@@ -37,6 +46,10 @@ export type ParseResult<M> = { ok: true; message: M } | { ok: false; reason: Par
 const MAX_STRING = 256;
 const MAX_LIST = 1024;
 const MAX_DIMENSION = 4096;
+/** Limits for save bytes; a message over any of them is refused whole, never truncated. */
+export const MAX_SAVE_FILES = 64;
+export const MAX_SAVE_FILE_BYTES = 1024 * 1024;
+export const MAX_SAVE_TOTAL_BYTES = 4 * 1024 * 1024;
 const KEY_CODE = /^[A-Za-z0-9]{1,32}$/;
 const GAME_ID = /^[A-Za-z0-9._-]{1,64}$/;
 
@@ -46,10 +59,33 @@ type Validator = (m: Fields) => boolean;
 const isString = (v: unknown, max = MAX_STRING): v is string => typeof v === 'string' && v.length > 0 && v.length <= max;
 const isDimension = (v: unknown): v is number => Number.isInteger(v) && (v as number) > 0 && (v as number) <= MAX_DIMENSION;
 
+/** A save path is `/<app name>/rms/<file>`: absolute, no `..`, no empty segments, no backslashes. */
+export function isSavePath(v: unknown): v is string {
+  if (!isString(v) || v.includes('\\') || v.includes('\0')) return false;
+  const parts = v.split('/');
+  return parts.length >= 4 && parts[0] === '' && parts[2] === 'rms' && parts.slice(1).every((p) => p !== '' && p !== '.' && p !== '..');
+}
+
+const isSaveBlobs = (v: unknown): boolean => {
+  if (!Array.isArray(v) || v.length > MAX_SAVE_FILES) return false;
+  let total = 0;
+  for (const f of v) {
+    if (!isPlainObject(f) || !isSavePath((f as Fields).path) || !((f as Fields).data instanceof ArrayBuffer)) return false;
+    const size = ((f as Fields).data as ArrayBuffer).byteLength;
+    total += size;
+    if (size > MAX_SAVE_FILE_BYTES || total > MAX_SAVE_TOTAL_BYTES) return false;
+  }
+  return true;
+};
+
+const isGameId = (v: unknown): boolean => typeof v === 'string' && GAME_ID.test(v);
+
 const hostValidators: Record<HostMessage['type'], Validator> = {
   hello: () => true,
   key: (m) => (m.action === 'down' || m.action === 'up') && typeof m.code === 'string' && KEY_CODE.test(m.code),
   'list-saves': (m) => typeof m.id === 'string' && GAME_ID.test(m.id),
+  'export-save': (m) => isGameId(m.id),
+  'import-save': (m) => isGameId(m.id) && isSaveBlobs(m.files),
 };
 
 const emulatorValidators: Record<EmulatorMessage['type'], Validator> = {
@@ -61,6 +97,8 @@ const emulatorValidators: Record<EmulatorMessage['type'], Validator> = {
     Array.isArray(m.files) &&
     m.files.length <= MAX_LIST &&
     m.files.every((f) => isPlainObject(f) && isString((f as Fields).path)),
+  'save-data': (m) => isGameId(m.id) && isSaveBlobs(m.files),
+  'import-result': (m) => isGameId(m.id) && Number.isInteger(m.imported) && (m.imported as number) >= 0 && (m.imported as number) <= MAX_SAVE_FILES,
   error: (m) => m.code === 'unknown-type' || m.code === 'bad-key',
 };
 
@@ -90,6 +128,10 @@ const KNOWN_FIELDS: Record<string, string[]> = {
   hello: [],
   key: ['action', 'code'],
   'list-saves': ['id'],
+  'export-save': ['id'],
+  'import-save': ['id', 'files'],
+  'save-data': ['id', 'files'],
+  'import-result': ['id', 'imported'],
   ready: ['capabilities'],
   started: ['width', 'height'],
   saves: ['id', 'files'],
@@ -98,7 +140,10 @@ const KNOWN_FIELDS: Record<string, string[]> = {
 
 function pick(type: string, data: Fields): Fields {
   const out: Fields = { type };
-  for (const k of KNOWN_FIELDS[type]!) out[k] = k === 'files' ? (data.files as Fields[]).map((f) => ({ path: f.path })) : data[k];
+  const withBytes = type === 'import-save' || type === 'save-data';
+  for (const k of KNOWN_FIELDS[type]!) {
+    out[k] = k === 'files' ? (data.files as Fields[]).map((f) => (withBytes ? { path: f.path, data: f.data } : { path: f.path })) : data[k];
+  }
   return out;
 }
 

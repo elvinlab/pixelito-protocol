@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { envelope, isTrustedSender, parseMessage, PROTOCOL_VERSION } from '../src/protocol.ts';
+import { envelope, isTrustedSender, MAX_SAVE_FILE_BYTES, MAX_SAVE_FILES, MAX_SAVE_TOTAL_BYTES, parseMessage, PROTOCOL_VERSION } from '../src/protocol.ts';
 
 const ok = (r: { ok: boolean }) => assert.equal(r.ok, true);
 const fails = (r: { ok: boolean; reason?: string }, reason: string) => {
@@ -124,4 +124,58 @@ test('isTrustedSender needs the exact origin AND the expected window', () => {
 test('isTrustedSender rejects when there is no expected window (source null or undefined)', () => {
   assert.equal(isTrustedSender({ origin: 'https://app.example', source: null }, ['https://app.example'], null), false);
   assert.equal(isTrustedSender({ origin: 'https://app.example', source: undefined }, ['https://app.example'], undefined), false);
+});
+
+const blob = (path: string, bytes = 4) => ({ path, data: new ArrayBuffer(bytes) });
+const GOOD = '/Rally Master Pro/rms/FL_RMP_OPT';
+
+test('save export and import messages round-trip through envelope', () => {
+  for (const m of [
+    { type: 'export-save' as const, id: 'GAEM' },
+    { type: 'import-save' as const, id: 'GAEM', files: [blob(GOOD)] },
+  ]) {
+    const r = parseMessage(envelope(m), 'host-to-emulator');
+    ok(r);
+    assert.deepEqual(r.ok && r.message, m);
+  }
+  for (const m of [
+    { type: 'save-data' as const, id: 'GAEM', files: [blob(GOOD)] },
+    { type: 'import-result' as const, id: 'GAEM', imported: 1 },
+  ]) {
+    const r = parseMessage(envelope(m), 'emulator-to-host');
+    ok(r);
+    assert.deepEqual(r.ok && r.message, m);
+  }
+});
+
+test('save paths must stay under /<app>/rms/', () => {
+  for (const path of ['/a/rms/../app.jar', '/a/config/x', 'a/rms/x', '/a/rms/', '/a//rms/x', '/a/rms/x\\y', '/rms/x', '/a/rms/./x']) {
+    fails(parseMessage(envelope({ type: 'import-save', id: 'GAEM', files: [blob(path)] }), 'host-to-emulator'), 'invalid-fields');
+  }
+});
+
+test('save bytes must be an ArrayBuffer within the size limits', () => {
+  const send = (files: unknown[]) => parseMessage({ pixelito: 1, type: 'import-save', id: 'GAEM', files }, 'host-to-emulator');
+  fails(send([{ path: GOOD, data: 'text' }]), 'invalid-fields');
+  fails(send([{ path: GOOD, data: new Uint8Array(4) }]), 'invalid-fields');
+  fails(send([blob(GOOD, MAX_SAVE_FILE_BYTES + 1)]), 'invalid-fields');
+  ok(send([blob(GOOD, MAX_SAVE_FILE_BYTES)]));
+  fails(send(Array.from({ length: MAX_SAVE_FILES + 1 }, (_, i) => blob(`/a/rms/${i}`))), 'invalid-fields');
+  const files = Array.from({ length: 5 }, (_, i) => blob(`/a/rms/${i}`, MAX_SAVE_FILE_BYTES));
+  assert.ok(files.length * MAX_SAVE_FILE_BYTES > MAX_SAVE_TOTAL_BYTES);
+  fails(send(files), 'invalid-fields');
+});
+
+test('import-result rejects negative, fractional and huge counts', () => {
+  for (const imported of [-1, 1.5, MAX_SAVE_FILES + 1, '1']) {
+    fails(parseMessage({ pixelito: 1, type: 'import-result', id: 'GAEM', imported }, 'emulator-to-host'), 'invalid-fields');
+  }
+});
+
+test('save messages are only valid in their own direction and drop extra fields', () => {
+  fails(parseMessage(envelope({ type: 'export-save', id: 'GAEM' }), 'emulator-to-host'), 'unknown-type');
+  fails(parseMessage(envelope({ type: 'import-result', id: 'GAEM', imported: 1 }), 'host-to-emulator'), 'unknown-type');
+  const r = parseMessage({ pixelito: 1, type: 'import-save', id: 'GAEM', files: [{ ...blob(GOOD), extra: 1 }], x: 1 }, 'host-to-emulator');
+  ok(r);
+  assert.deepEqual(Object.keys(r.ok ? (r.message as { files: object[] }).files[0]! : {}), ['path', 'data']);
 });
