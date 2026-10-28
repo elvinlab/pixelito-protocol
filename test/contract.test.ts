@@ -30,6 +30,7 @@ test('every emulator message type parses and round-trips through envelope', () =
     { type: 'saves' as const, id: 'GAEM', files: [{ path: '/GAEM/rms/SAVE0' }] },
     { type: 'error' as const, code: 'bad-key' as const },
     { type: 'error' as const, code: 'unknown-type' as const },
+    { type: 'error' as const, code: 'save-failed' as const },
   ]) {
     const r = parseMessage(envelope(m), 'emulator-to-host');
     ok(r);

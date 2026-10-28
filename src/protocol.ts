@@ -11,7 +11,7 @@ export const PROTOCOL_VERSION = 1;
 
 export type Direction = 'host-to-emulator' | 'emulator-to-host';
 
-export type ErrorCode = 'unknown-type' | 'bad-key';
+export type ErrorCode = 'unknown-type' | 'bad-key' | 'save-failed';
 
 export interface SaveFile {
   path: string;
@@ -103,7 +103,7 @@ const emulatorValidators: Record<EmulatorMessage['type'], Validator> = {
     m.files.every((f) => isPlainObject(f) && isString((f as Fields).path)),
   'save-data': (m) => isGameId(m.id) && isSaveBlobs(m.files),
   'import-result': (m) => isGameId(m.id) && Number.isInteger(m.imported) && (m.imported as number) >= 0 && (m.imported as number) <= MAX_SAVE_FILES,
-  error: (m) => m.code === 'unknown-type' || m.code === 'bad-key',
+  error: (m) => m.code === 'unknown-type' || m.code === 'bad-key' || m.code === 'save-failed',
 };
 
 function isPlainObject(v: unknown): v is Fields {
